@@ -1,28 +1,72 @@
+// src/ShoppingListDetailRoute.js
 import React, { useState, useMemo } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 
-const INITIAL_SHOPPING_LIST = {
-  id: 1,
-  name: "Víkendový nákup",
-  ownerId: 1,
-  members: [
-    { id: 1, name: "Alena" }, // vlastník
-    { id: 2, name: "Petr" },  // člen
-    { id: 3, name: "Katka" }, // člen
-  ],
-  items: [
-    { id: 1, name: "Mléko 2×", done: false },
-    { id: 2, name: "Chléb", done: true },
-    { id: 3, name: "Máslo", done: false },
-  ],
+// Data pro jednotlivé seznamy podle ID
+const SHOPPING_LISTS_BY_ID = {
+  1: {
+    id: 1,
+    name: "Víkendový nákup",
+    ownerId: 1,
+    members: [
+      { id: 1, name: "Alena" }, // vlastník
+      { id: 2, name: "Petr" },
+      { id: 3, name: "Katka" },
+    ],
+    items: [
+      { id: 1, name: "Mléko 2×", done: false },
+      { id: 2, name: "Chléb", done: true },
+      { id: 3, name: "Máslo", done: false },
+    ],
+  },
+  2: {
+    id: 2,
+    name: "Dovolená hory",
+    ownerId: 2,
+    members: [
+      { id: 2, name: "Petr" }, // vlastník
+      { id: 1, name: "Alena" },
+    ],
+    items: [
+      { id: 1, name: "Pivo", done: false },
+      { id: 2, name: "Špekáčky", done: false },
+    ],
+  },
+  3: {
+    id: 3,
+    name: "Firemní párty",
+    ownerId: 3,
+    members: [
+      { id: 3, name: "Katka" }, // vlastník
+      { id: 2, name: "Petr" },
+      { id: 1, name: "Alena" },
+    ],
+    items: [
+      { id: 1, name: "Chlebíčky", done: true },
+      { id: 2, name: "Pití", done: true },
+    ],
+  },
 };
 
 function ShoppingListDetailRoute() {
-  const [shoppingList, setShoppingList] = useState(INITIAL_SHOPPING_LIST);
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const listId = Number(id);
 
-  // simulace přihlášeného uživatele (null = návštěvník)
-  const [currentUserId, setCurrentUserId] = useState(2); // start: Petr
+  const initialList = SHOPPING_LISTS_BY_ID[listId] || null;
+  const listFound = !!initialList;
 
-  const [listNameDraft, setListNameDraft] = useState(INITIAL_SHOPPING_LIST.name);
+  // fallback – kdyby bylo ID mimo rozsah, aby hooky měly vždy nějaká data
+  const fallbackList = SHOPPING_LISTS_BY_ID[1];
+
+  // HOOKY – volají se vždy, nikdy ne podmíněně
+  const [shoppingList, setShoppingList] = useState(
+    initialList || fallbackList
+  );
+  const [currentUserId, setCurrentUserId] = useState(2); // simulace uživatele Petr
+  const [listNameDraft, setListNameDraft] = useState(
+    (initialList || fallbackList).name
+  );
   const [newMemberName, setNewMemberName] = useState("");
   const [newItemName, setNewItemName] = useState("");
   const [itemFilter, setItemFilter] = useState("open"); // "open" | "all"
@@ -31,8 +75,7 @@ function ShoppingListDetailRoute() {
     (m) => m.id === currentUserId
   );
   const isOwner = shoppingList.ownerId === currentUserId;
-  const isVisitor = !currentUser && !isOwner; // není člen ani vlastník
-
+  const isVisitor = !currentUser && !isOwner;
 
   const filteredItems = useMemo(() => {
     if (itemFilter === "open") {
@@ -81,7 +124,6 @@ function ShoppingListDetailRoute() {
     setShoppingList((prev) => {
       const updatedMembers = prev.members.filter((m) => m.id !== memberId);
 
-      // když smažu právě zvoleného uživatele, přepnu na návštěvníka
       if (memberId === currentUserId) {
         setCurrentUserId(null);
       }
@@ -95,15 +137,15 @@ function ShoppingListDetailRoute() {
 
   // "odejít" ze seznamu
   const handleLeaveList = () => {
-    if (!currentUser || isOwner) return; // vlastník nemůže opustit seznam
+    if (!currentUser || isOwner) return;
     setShoppingList((prev) => ({
       ...prev,
       members: prev.members.filter((m) => m.id !== currentUserId),
     }));
-    setCurrentUserId(null); // po odchodu je z něj návštěvník
+    setCurrentUserId(null);
   };
 
-  // přidání položky (viewer nemůže)
+  // přidání položky
   const handleAddItem = () => {
     if (isVisitor) return;
 
@@ -130,7 +172,7 @@ function ShoppingListDetailRoute() {
     }));
   };
 
-  // označení položky jako vyřešené / nevyřešené
+  // toggle done
   const handleToggleItemDone = (itemId) => {
     if (isVisitor) return;
 
@@ -142,24 +184,42 @@ function ShoppingListDetailRoute() {
     }));
   };
 
-  // změna filtru
   const handleChangeFilter = (event) => {
     setItemFilter(event.target.value);
   };
 
-  // přepnutí "simulovaného" uživatele
   const handleChangeUser = (event) => {
     const value = event.target.value;
     if (value === "") {
-      setCurrentUserId(null); // návštěvník
+      setCurrentUserId(null);
     } else {
       setCurrentUserId(Number(value));
     }
   };
 
+  // ──────────────────────────────────────────
+  // RENDER
+  // ──────────────────────────────────────────
+
+  // Když ID neexistuje, zobrazíme jednoduchou hlášku:
+  if (!listFound) {
+    return (
+      <div style={cardStyle}>
+        <h2>Seznam nenalezen</h2>
+        <p>Pro dané ID neexistuje žádný nákupní seznam.</p>
+      </div>
+    );
+  }
+
   return (
     <div style={cardStyle}>
-      <section style={{ marginBottom: 16, paddingBottom: 12, borderBottom: "1px solid #eee" }}>
+      <section
+        style={{
+          marginBottom: 16,
+          paddingBottom: 12,
+          borderBottom: "1px solid #eee",
+        }}
+      >
         <h3>Simulace přihlášeného uživatele</h3>
         <label>
           Simulovaný uživatel:{" "}
@@ -178,6 +238,20 @@ function ShoppingListDetailRoute() {
           </select>
         </label>
       </section>
+
+      <button
+        onClick={() => navigate("/")}
+        style={{
+          marginBottom: 20,
+          padding: "6px 12px",
+          background: "#eee",
+          border: "1px solid #ccc",
+          borderRadius: 4,
+          cursor: "pointer",
+        }}
+      >
+      Zpět na přehled
+      </button>
 
       <section style={{ marginBottom: "24px" }}>
         <h2>Detail nákupního seznamu</h2>
@@ -205,7 +279,8 @@ function ShoppingListDetailRoute() {
 
         <div style={{ marginTop: 16 }}>
           <strong>Vlastník:</strong>{" "}
-          {shoppingList.members.find((m) => m.id === shoppingList.ownerId)?.name}
+          {shoppingList.members.find((m) => m.id === shoppingList.ownerId)
+            ?.name || "Neznámý"}
         </div>
         <div>
           <strong>Aktuální uživatel:</strong>{" "}
