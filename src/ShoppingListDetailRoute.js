@@ -1,79 +1,58 @@
-// src/ShoppingListDetailRoute.js
-import React, { useState, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-
-// Data pro jednotlivé seznamy podle ID
-const SHOPPING_LISTS_BY_ID = {
-  1: {
-    id: 1,
-    name: "Víkendový nákup",
-    ownerId: 1,
-    members: [
-      { id: 1, name: "Alena" }, // vlastník
-      { id: 2, name: "Petr" },
-      { id: 3, name: "Katka" },
-    ],
-    items: [
-      { id: 1, name: "Mléko 2×", done: false },
-      { id: 2, name: "Chléb", done: true },
-      { id: 3, name: "Máslo", done: false },
-    ],
-  },
-  2: {
-    id: 2,
-    name: "Dovolená hory",
-    ownerId: 2,
-    members: [
-      { id: 2, name: "Petr" }, // vlastník
-      { id: 1, name: "Alena" },
-    ],
-    items: [
-      { id: 1, name: "Pivo", done: false },
-      { id: 2, name: "Špekáčky", done: false },
-    ],
-  },
-  3: {
-    id: 3,
-    name: "Firemní párty",
-    ownerId: 3,
-    members: [
-      { id: 3, name: "Katka" }, // vlastník
-      { id: 2, name: "Petr" },
-      { id: 1, name: "Alena" },
-    ],
-    items: [
-      { id: 1, name: "Chlebíčky", done: true },
-      { id: 2, name: "Pití", done: true },
-    ],
-  },
-};
+import { shoppingListsApi } from "./api/shoppingLists";
 
 function ShoppingListDetailRoute() {
   const { id } = useParams();
   const navigate = useNavigate();
   const listId = Number(id);
 
-  const initialList = SHOPPING_LISTS_BY_ID[listId] || null;
-  const listFound = !!initialList;
-
-  // fallback – kdyby bylo ID mimo rozsah, aby hooky měly vždy nějaká data
-  const fallbackList = SHOPPING_LISTS_BY_ID[1];
-
   // HOOKY – volají se vždy, nikdy ne podmíněně
-  const [shoppingList, setShoppingList] = useState(
-    initialList || fallbackList
-  );
+  const [status, setStatus] = useState("loading"); // loading | ready | error | notFound
+  const [error, setError] = useState(null);
+  const [shoppingList, setShoppingList] = useState({
+    id: listId,
+    name: "",
+    ownerId: 1,
+    members: [],
+    items: [],
+  });
   const [currentUserId, setCurrentUserId] = useState(2); // simulace uživatele Petr
-  const [listNameDraft, setListNameDraft] = useState(
-    (initialList || fallbackList).name
-  );
+  const [listNameDraft, setListNameDraft] = useState("");
   const [newMemberName, setNewMemberName] = useState("");
   const [newItemName, setNewItemName] = useState("");
   const [itemFilter, setItemFilter] = useState("open"); // "open" | "all"
 
-  const currentUser = shoppingList.members.find(
-    (m) => m.id === currentUserId
-  );
+  async function loadDetail() {
+    // když URL není validní číslo, nepouštěj request
+    if (!Number.isFinite(listId)) {
+      setStatus("notFound");
+      return;
+    }
+
+    setStatus("loading");
+    setError(null);
+    try {
+      const data = await shoppingListsApi.get(listId);
+      setShoppingList(data);
+      setListNameDraft(data?.name || "");
+      setStatus("ready");
+    } catch (e) {
+      if (e?.status === 404) {
+        setStatus("notFound");
+      } else {
+        setError(e);
+        setStatus("error");
+      }
+    }
+  }
+
+  useEffect(() => {
+    loadDetail();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listId]);
+
+  const currentUser = shoppingList.members.find((m) => m.id === currentUserId);
   const isOwner = shoppingList.ownerId === currentUserId;
   const isVisitor = !currentUser && !isOwner;
 
@@ -92,7 +71,13 @@ function ShoppingListDetailRoute() {
     if (!isOwner) return;
     const trimmed = listNameDraft.trim();
     if (!trimmed) return;
+    const prevName = shoppingList.name;
     setShoppingList((prev) => ({ ...prev, name: trimmed }));
+    shoppingListsApi.update(listId, { name: trimmed }).catch((e) => {
+      // rollback
+      setShoppingList((prev) => ({ ...prev, name: prevName }));
+      alert(e.message || "Nepodařilo se uložit název");
+    });
   };
 
   // vlastník přidává členy
@@ -105,10 +90,13 @@ function ShoppingListDetailRoute() {
       (shoppingList.members.reduce((max, m) => Math.max(max, m.id), 0) || 0) +
       1;
 
-    setShoppingList((prev) => ({
-      ...prev,
-      members: [...prev.members, { id: nextId, name: trimmed }],
-    }));
+    const nextMembers = [...shoppingList.members, { id: nextId, name: trimmed }];
+    setShoppingList((prev) => ({ ...prev, members: nextMembers }));
+    shoppingListsApi.update(listId, { members: nextMembers }).catch((e) => {
+      // rollback
+      setShoppingList((prev) => ({ ...prev, members: shoppingList.members }));
+      alert(e.message || "Nepodařilo se přidat člena");
+    });
     setNewMemberName("");
   };
 
@@ -121,28 +109,29 @@ function ShoppingListDetailRoute() {
       return;
     }
 
-    setShoppingList((prev) => {
-      const updatedMembers = prev.members.filter((m) => m.id !== memberId);
+    const prevMembers = shoppingList.members;
+    const updatedMembers = prevMembers.filter((m) => m.id !== memberId);
+    setShoppingList((prev) => ({ ...prev, members: updatedMembers }));
+    if (memberId === currentUserId) setCurrentUserId(null);
 
-      if (memberId === currentUserId) {
-        setCurrentUserId(null);
-      }
-
-      return {
-        ...prev,
-        members: updatedMembers,
-      };
+    shoppingListsApi.update(listId, { members: updatedMembers }).catch((e) => {
+      setShoppingList((prev) => ({ ...prev, members: prevMembers }));
+      alert(e.message || "Nepodařilo se odebrat člena");
     });
   };
 
   // "odejít" ze seznamu
   const handleLeaveList = () => {
     if (!currentUser || isOwner) return;
-    setShoppingList((prev) => ({
-      ...prev,
-      members: prev.members.filter((m) => m.id !== currentUserId),
-    }));
+    const prevMembers = shoppingList.members;
+    const updatedMembers = prevMembers.filter((m) => m.id !== currentUserId);
+    setShoppingList((prev) => ({ ...prev, members: updatedMembers }));
     setCurrentUserId(null);
+
+    shoppingListsApi.update(listId, { members: updatedMembers }).catch((e) => {
+      setShoppingList((prev) => ({ ...prev, members: prevMembers }));
+      alert(e.message || "Nepodařilo se odejít ze seznamu");
+    });
   };
 
   // přidání položky
@@ -155,10 +144,16 @@ function ShoppingListDetailRoute() {
     const nextId =
       (shoppingList.items.reduce((max, i) => Math.max(max, i.id), 0) || 0) + 1;
 
-    setShoppingList((prev) => ({
-      ...prev,
-      items: [...prev.items, { id: nextId, name: trimmed, done: false }],
-    }));
+    const prevItems = shoppingList.items;
+    const updatedItems = [
+      ...prevItems,
+      { id: nextId, name: trimmed, done: false },
+    ];
+    setShoppingList((prev) => ({ ...prev, items: updatedItems }));
+    shoppingListsApi.update(listId, { items: updatedItems }).catch((e) => {
+      setShoppingList((prev) => ({ ...prev, items: prevItems }));
+      alert(e.message || "Nepodařilo se přidat položku");
+    });
     setNewItemName("");
   };
 
@@ -166,22 +161,28 @@ function ShoppingListDetailRoute() {
   const handleRemoveItem = (itemId) => {
     if (isVisitor) return;
 
-    setShoppingList((prev) => ({
-      ...prev,
-      items: prev.items.filter((i) => i.id !== itemId),
-    }));
+    const prevItems = shoppingList.items;
+    const updatedItems = prevItems.filter((i) => i.id !== itemId);
+    setShoppingList((prev) => ({ ...prev, items: updatedItems }));
+    shoppingListsApi.update(listId, { items: updatedItems }).catch((e) => {
+      setShoppingList((prev) => ({ ...prev, items: prevItems }));
+      alert(e.message || "Nepodařilo se smazat položku");
+    });
   };
 
   // toggle done
   const handleToggleItemDone = (itemId) => {
     if (isVisitor) return;
 
-    setShoppingList((prev) => ({
-      ...prev,
-      items: prev.items.map((i) =>
-        i.id === itemId ? { ...i, done: !i.done } : i
-      ),
-    }));
+    const prevItems = shoppingList.items;
+    const updatedItems = prevItems.map((i) =>
+      i.id === itemId ? { ...i, done: !i.done } : i
+    );
+    setShoppingList((prev) => ({ ...prev, items: updatedItems }));
+    shoppingListsApi.update(listId, { items: updatedItems }).catch((e) => {
+      setShoppingList((prev) => ({ ...prev, items: prevItems }));
+      alert(e.message || "Nepodařilo se změnit stav položky");
+    });
   };
 
   const handleChangeFilter = (event) => {
@@ -201,8 +202,28 @@ function ShoppingListDetailRoute() {
   // RENDER
   // ──────────────────────────────────────────
 
+  if (status === "loading") {
+    return (
+      <div style={cardStyle}>
+        <p>Načítám detail…</p>
+      </div>
+    );
+  }
+
+  if (status === "error") {
+    return (
+      <div style={cardStyle}>
+        <h2>Chyba</h2>
+        <p style={{ color: "#b00020" }}>
+          Nepodařilo se načíst detail: {error?.message || "Neznámá chyba"}
+        </p>
+        <button onClick={loadDetail}>Zkusit znovu</button>
+      </div>
+    );
+  }
+
   // Když ID neexistuje, zobrazíme jednoduchou hlášku:
-  if (!listFound) {
+  if (status === "notFound") {
     return (
       <div style={cardStyle}>
         <h2>Seznam nenalezen</h2>
@@ -250,7 +271,7 @@ function ShoppingListDetailRoute() {
           cursor: "pointer",
         }}
       >
-      Zpět na přehled
+        Zpět na přehled
       </button>
 
       <section style={{ marginBottom: "24px" }}>
@@ -416,7 +437,9 @@ function ShoppingListDetailRoute() {
             value={newItemName}
             onChange={(e) => setNewItemName(e.target.value)}
             placeholder={
-              isVisitor ? "Návštěvník nemůže přidávat položky" : "Název nové položky"
+              isVisitor
+                ? "Návštěvník nemůže přidávat položky"
+                : "Název nové položky"
             }
             style={{ flex: 1, padding: "6px 8px" }}
             disabled={isVisitor}

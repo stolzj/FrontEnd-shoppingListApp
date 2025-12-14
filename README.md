@@ -1,4 +1,14 @@
-<<<<<<< HEAD
+## Spuštění projektu
+
+### Instalace
+`npm install`
+
+# Spuštění s mock backendem
+Projekt je ve výchozím stavu nastaven tak, že `npm start` spustí aplikaci s mockovanými server calls.
+
+# Spuštění bez mocků
+`npm run start:nomock`
+
 # Getting Started with Create React App
 
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).

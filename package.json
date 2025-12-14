@@ -14,7 +14,8 @@
     "web-vitals": "^2.1.4"
   },
   "scripts": {
-    "start": "react-scripts start",
+    "start": "cross-env REACT_APP_USE_MOCKS=true react-scripts start",
+    "start:nomock": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
@@ -35,6 +36,15 @@
       "last 1 chrome version",
       "last 1 firefox version",
       "last 1 safari version"
+    ]
+  },
+  "devDependencies": {
+    "cross-env": "^10.1.0",
+    "msw": "^2.12.4"
+  },
+  "msw": {
+    "workerDirectory": [
+      "public"
     ]
   }
 }
