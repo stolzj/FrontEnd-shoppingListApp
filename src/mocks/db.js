@@ -1,10 +1,5 @@
 import { INITIAL_LISTS } from "../shoppingData";
 
-/**
- * In-memory DB for mock server.
- * NOTE: This resets on page reload.
- */
-
 let lists = structuredClone(INITIAL_LISTS);
 
 function nextId() {
@@ -18,7 +13,6 @@ export const db = {
   },
 
   list() {
-    // return shallow list summary like server would
     return lists.map((l) => ({
       id: l.id,
       name: l.name,
@@ -54,7 +48,6 @@ export const db = {
     const updated = {
       ...current,
       ...patch,
-      // keep arrays if patch doesn't include them
       members: patch?.members ?? current.members,
       items: patch?.items ?? current.items,
     };

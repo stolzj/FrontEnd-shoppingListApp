@@ -3,7 +3,6 @@ export async function httpJson(path, { method = "GET", body, headers } = {}) {
     ...(headers || {}),
   };
 
-  // Content-Type dává smysl jen pokud něco posíláš
   if (body != null) {
     finalHeaders["Content-Type"] = "application/json";
   }

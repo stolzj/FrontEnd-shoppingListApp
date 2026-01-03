@@ -1,30 +1,37 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import { PieChart, Pie, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { shoppingListsApi } from "./api/shoppingLists";
 
 function ShoppingListDetailRoute() {
+  const { t } = useTranslation();
   const { id } = useParams();
   const navigate = useNavigate();
   const listId = Number(id);
 
-  // HOOKY – volají se vždy, nikdy ne podmíněně
   const [status, setStatus] = useState("loading"); // loading | ready | error | notFound
   const [error, setError] = useState(null);
-  const [shoppingList, setShoppingList] = useState({
-    id: listId,
-    name: "",
-    ownerId: 1,
-    members: [],
-    items: [],
-  });
-  const [currentUserId, setCurrentUserId] = useState(2); // simulace uživatele Petr
+  const [shoppingList, setShoppingList] = useState(null);
+
+  // simulace uživatele (v reálné app by bylo z auth)
+  const [currentUserId, setCurrentUserId] = useState(2);
+
   const [listNameDraft, setListNameDraft] = useState("");
   const [newMemberName, setNewMemberName] = useState("");
   const [newItemName, setNewItemName] = useState("");
-  const [itemFilter, setItemFilter] = useState("open"); // "open" | "all"
+  const [itemFilter, setItemFilter] = useState("open"); // open | all
+
+  const safeList = shoppingList ?? {
+  id: listId,
+  name: "",
+  ownerId: 1,
+  members: [],
+  items: []
+};
+
 
   async function loadDetail() {
-    // když URL není validní číslo, nepouštěj request
     if (!Number.isFinite(listId)) {
       setStatus("notFound");
       return;
@@ -34,8 +41,12 @@ function ShoppingListDetailRoute() {
     setError(null);
     try {
       const data = await shoppingListsApi.get(listId);
+      if (!data) {
+      setStatus("notFound");
+      return;
+      }
       setShoppingList(data);
-      setListNameDraft(data?.name || "");
+      setListNameDraft(data.name || "");
       setStatus("ready");
     } catch (e) {
       if (e?.status === 404) {
@@ -52,89 +63,96 @@ function ShoppingListDetailRoute() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listId]);
 
-  const currentUser = shoppingList.members.find((m) => m.id === currentUserId);
-  const isOwner = shoppingList.ownerId === currentUserId;
+  const currentUser = (safeList.members || []).find((m) => m.id === currentUserId);
+  const isOwner = safeList.ownerId === currentUserId;
   const isVisitor = !currentUser && !isOwner;
 
   const filteredItems = useMemo(() => {
-    if (itemFilter === "open") {
-      return shoppingList.items.filter((item) => !item.done);
-    }
-    return shoppingList.items;
-  }, [shoppingList.items, itemFilter]);
+  const items = safeList.items || [];
+  if (itemFilter === "open") return items.filter((item) => !item.done);
+  return items;
+  }, [safeList.items, itemFilter]);
 
-  const totalItems = shoppingList.items.length;
-  const openItems = shoppingList.items.filter((i) => !i.done).length;
 
-  // změna názvu (vlastník)
+  const totalItems = (safeList.items || []).length;
+  const openItems = (safeList.items || []).filter((i) => !i.done).length;
+  const doneItems = Math.max(0, totalItems - openItems);
+
+
+  const pieData = useMemo(
+    () => [
+      { name: t("open"), value: openItems },
+      { name: t("done"), value: doneItems }
+    ],
+    [openItems, doneItems, t]
+  );
+
   const handleSaveName = () => {
     if (!isOwner) return;
     const trimmed = listNameDraft.trim();
     if (!trimmed) return;
-    const prevName = shoppingList.name;
+
+    const prevName = safeList.name;
     setShoppingList((prev) => ({ ...prev, name: trimmed }));
     shoppingListsApi.update(listId, { name: trimmed }).catch((e) => {
-      // rollback
       setShoppingList((prev) => ({ ...prev, name: prevName }));
-      alert(e.message || "Nepodařilo se uložit název");
+      alert(e.message || t("saveNameFailed"));
     });
   };
 
-  // vlastník přidává členy
   const handleAddMember = () => {
     if (!isOwner) return;
     const trimmed = newMemberName.trim();
     if (!trimmed) return;
 
     const nextId =
-      (shoppingList.members.reduce((max, m) => Math.max(max, m.id), 0) || 0) +
-      1;
+      ((safeList.members || []).reduce((max, m) => Math.max(max, m.id), 0) ||
+        0) + 1;
 
-    const nextMembers = [...shoppingList.members, { id: nextId, name: trimmed }];
+    const prevMembers = safeList.members;
+    const nextMembers = [...prevMembers, { id: nextId, name: trimmed }];
     setShoppingList((prev) => ({ ...prev, members: nextMembers }));
     shoppingListsApi.update(listId, { members: nextMembers }).catch((e) => {
-      // rollback
-      setShoppingList((prev) => ({ ...prev, members: shoppingList.members }));
-      alert(e.message || "Nepodařilo se přidat člena");
+      setShoppingList((prev) => ({ ...prev, members: prevMembers }));
+      alert(e.message || t("addMemberFailed"));
     });
+
     setNewMemberName("");
   };
 
-  // vlastník odebírá člena
   const handleRemoveMember = (memberId) => {
     if (!isOwner) return;
 
-    if (memberId === shoppingList.ownerId) {
-      alert("Vlastníka nelze odstranit 🙂");
+    if (memberId === safeList.ownerId) {
+      alert(t("cannotRemoveOwner"));
       return;
     }
 
-    const prevMembers = shoppingList.members;
+    const prevMembers = safeList.members;
     const updatedMembers = prevMembers.filter((m) => m.id !== memberId);
     setShoppingList((prev) => ({ ...prev, members: updatedMembers }));
     if (memberId === currentUserId) setCurrentUserId(null);
 
     shoppingListsApi.update(listId, { members: updatedMembers }).catch((e) => {
       setShoppingList((prev) => ({ ...prev, members: prevMembers }));
-      alert(e.message || "Nepodařilo se odebrat člena");
+      alert(e.message || t("removeMemberFailed"));
     });
   };
 
-  // "odejít" ze seznamu
   const handleLeaveList = () => {
     if (!currentUser || isOwner) return;
-    const prevMembers = shoppingList.members;
+
+    const prevMembers = safeList.members;
     const updatedMembers = prevMembers.filter((m) => m.id !== currentUserId);
     setShoppingList((prev) => ({ ...prev, members: updatedMembers }));
     setCurrentUserId(null);
 
     shoppingListsApi.update(listId, { members: updatedMembers }).catch((e) => {
       setShoppingList((prev) => ({ ...prev, members: prevMembers }));
-      alert(e.message || "Nepodařilo se odejít ze seznamu");
+      alert(e.message || t("leaveFailed"));
     });
   };
 
-  // přidání položky
   const handleAddItem = () => {
     if (isVisitor) return;
 
@@ -142,208 +160,211 @@ function ShoppingListDetailRoute() {
     if (!trimmed) return;
 
     const nextId =
-      (shoppingList.items.reduce((max, i) => Math.max(max, i.id), 0) || 0) + 1;
+      ((safeList.items || []).reduce((max, i) => Math.max(max, i.id), 0) ||
+        0) + 1;
 
-    const prevItems = shoppingList.items;
-    const updatedItems = [
-      ...prevItems,
-      { id: nextId, name: trimmed, done: false },
-    ];
+    const prevItems = safeList.items;
+    const updatedItems = [...prevItems, { id: nextId, name: trimmed, done: false }];
     setShoppingList((prev) => ({ ...prev, items: updatedItems }));
     shoppingListsApi.update(listId, { items: updatedItems }).catch((e) => {
       setShoppingList((prev) => ({ ...prev, items: prevItems }));
-      alert(e.message || "Nepodařilo se přidat položku");
+      alert(e.message || t("addItemFailed"));
     });
+
     setNewItemName("");
   };
 
-  // odebrání položky
   const handleRemoveItem = (itemId) => {
     if (isVisitor) return;
 
-    const prevItems = shoppingList.items;
+    const prevItems = safeList.items;
     const updatedItems = prevItems.filter((i) => i.id !== itemId);
     setShoppingList((prev) => ({ ...prev, items: updatedItems }));
     shoppingListsApi.update(listId, { items: updatedItems }).catch((e) => {
       setShoppingList((prev) => ({ ...prev, items: prevItems }));
-      alert(e.message || "Nepodařilo se smazat položku");
+      alert(e.message || t("deleteItemFailed"));
     });
   };
 
-  // toggle done
   const handleToggleItemDone = (itemId) => {
     if (isVisitor) return;
 
-    const prevItems = shoppingList.items;
+    const prevItems = safeList.items;
     const updatedItems = prevItems.map((i) =>
       i.id === itemId ? { ...i, done: !i.done } : i
     );
     setShoppingList((prev) => ({ ...prev, items: updatedItems }));
     shoppingListsApi.update(listId, { items: updatedItems }).catch((e) => {
       setShoppingList((prev) => ({ ...prev, items: prevItems }));
-      alert(e.message || "Nepodařilo se změnit stav položky");
+      alert(e.message || t("toggleItemFailed"));
     });
-  };
-
-  const handleChangeFilter = (event) => {
-    setItemFilter(event.target.value);
   };
 
   const handleChangeUser = (event) => {
     const value = event.target.value;
-    if (value === "") {
-      setCurrentUserId(null);
-    } else {
-      setCurrentUserId(Number(value));
-    }
+    if (value === "") setCurrentUserId(null);
+    else setCurrentUserId(Number(value));
   };
-
-  // ──────────────────────────────────────────
-  // RENDER
-  // ──────────────────────────────────────────
 
   if (status === "loading") {
     return (
-      <div style={cardStyle}>
-        <p>Načítám detail…</p>
+      <div className="card">
+        <p>{t("loadingDetail")}</p>
       </div>
     );
   }
 
   if (status === "error") {
     return (
-      <div style={cardStyle}>
-        <h2>Chyba</h2>
-        <p style={{ color: "#b00020" }}>
-          Nepodařilo se načíst detail: {error?.message || "Neznámá chyba"}
+      <div className="card">
+        <h2 style={{ marginTop: 0 }}>{t("error")}</h2>
+        <p style={{ color: "var(--danger)" }}>
+          {t("loadDetailError")}: {error?.message || "—"}
         </p>
-        <button onClick={loadDetail}>Zkusit znovu</button>
+        <button className="btn" onClick={loadDetail}>
+          {t("retry")}
+        </button>
       </div>
     );
   }
 
-  // Když ID neexistuje, zobrazíme jednoduchou hlášku:
   if (status === "notFound") {
     return (
-      <div style={cardStyle}>
-        <h2>Seznam nenalezen</h2>
-        <p>Pro dané ID neexistuje žádný nákupní seznam.</p>
+      <div className="card">
+        <h2 style={{ marginTop: 0 }}>{t("listNotFound")}</h2>
+        <p>{t("listNotFoundText")}</p>
       </div>
     );
   }
 
   return (
-    <div style={cardStyle}>
-      <section
-        style={{
-          marginBottom: 16,
-          paddingBottom: 12,
-          borderBottom: "1px solid #eee",
-        }}
-      >
-        <h3>Simulace přihlášeného uživatele</h3>
-        <label>
-          Simulovaný uživatel:{" "}
+    <div className="card" style={{ maxWidth: 900, margin: "0 auto" }}>
+      <section className="row" style={{ justifyContent: "space-between" }}>
+        <div>
+          <div style={{ fontWeight: 700 }}>{t("signedInSim")}</div>
+          <div className="subtle">{t("currentUserSim")}</div>
+        </div>
+
+        <label className="field">
+          <span className="field__label">{t("currentUser")}</span>
           <select
+            className="input"
             value={currentUserId ?? ""}
             onChange={handleChangeUser}
-            style={{ padding: "4px 8px" }}
           >
-            <option value="">Neregistrovaný návštěvník</option>
-            {shoppingList.members.map((m) => (
+            <option value="">{t("visitor")}</option>
+            {safeList.members.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.name}
-                {m.id === shoppingList.ownerId ? " (vlastník)" : ""}
+                {m.id === safeList.ownerId ? " (owner)" : ""}
               </option>
             ))}
           </select>
         </label>
       </section>
 
-      <button
-        onClick={() => navigate("/")}
-        style={{
-          marginBottom: 20,
-          padding: "6px 12px",
-          background: "#eee",
-          border: "1px solid #ccc",
-          borderRadius: 4,
-          cursor: "pointer",
-        }}
-      >
-        Zpět na přehled
+      <hr className="divider" />
+
+      <button className="btn" onClick={() => navigate("/")}>
+        {t("back")}
       </button>
 
-      <section style={{ marginBottom: "24px" }}>
-        <h2>Detail nákupního seznamu</h2>
+      <h2 style={{ margin: "14px 0 8px" }}>{t("listDetailTitle")}</h2>
 
-        <label style={{ display: "block", marginBottom: 8 }}>
-          Název seznamu:
-        </label>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+      <div className="row" style={{ alignItems: "flex-end" }}>
+        <label style={{ flex: 1 }}>
+          <div className="subtle" style={{ marginBottom: 6 }}>
+            {t("listName")}
+          </div>
           <input
+            className="input"
+            style={{ width: "100%" }}
             type="text"
             value={listNameDraft}
             onChange={(e) => setListNameDraft(e.target.value)}
             disabled={!isOwner}
-            style={{ flex: 1, padding: "6px 8px" }}
           />
-          <button onClick={handleSaveName} disabled={!isOwner}>
-            Uložit
-          </button>
-        </div>
-        {!isOwner && (
-          <small style={{ color: "#888" }}>
-            Název může měnit pouze vlastník seznamu.
-          </small>
-        )}
+        </label>
+        <button
+          className="btn btn--primary"
+          onClick={handleSaveName}
+          disabled={!isOwner}
+        >
+          {t("save")}
+        </button>
+      </div>
 
-        <div style={{ marginTop: 16 }}>
-          <strong>Vlastník:</strong>{" "}
-          {shoppingList.members.find((m) => m.id === shoppingList.ownerId)
-            ?.name || "Neznámý"}
+      {!isOwner && (
+        <div className="subtle" style={{ marginTop: 6 }}>
+          {t("nameOnlyOwner")}
         </div>
-        <div>
-          <strong>Aktuální uživatel:</strong>{" "}
-          {currentUser ? currentUser.name : "Neregistrovaný návštěvník"}
-        </div>
-        {isVisitor && (
-          <small style={{ color: "#888" }}>
-            Jako návštěvník můžeš seznam jen prohlížet a filtrovat položky.
-          </small>
-        )}
-        <div style={{ marginTop: 8 }}>
-          <strong>Položky:</strong> {openItems} nevyřešených / {totalItems} celkem
-        </div>
-      </section>
+      )}
 
-      <section style={sectionStyle}>
-        <h3>Členové seznamu</h3>
+      <div className="row" style={{ marginTop: 14, justifyContent: "space-between" }}>
+        <div style={{ minWidth: 280 }}>
+          <div>
+            <strong>{t("owner")}:</strong>{" "}
+            {safeList.members.find((m) => m.id === safeList.ownerId)?.name || "—"}
+          </div>
+          <div>
+            <strong>{t("currentUser")}:</strong>{" "}
+            {currentUser ? currentUser.name : t("visitor")}
+          </div>
+          {isVisitor && (
+            <div className="subtle" style={{ marginTop: 6 }}>
+              {t("visitorHint")}
+            </div>
+          )}
 
-        <ul style={{ paddingLeft: 20 }}>
-          {shoppingList.members.map((member) => (
+          <div style={{ marginTop: 10 }}>
+            <strong>{t("itemsTotal")}:</strong> {totalItems}
+            {" · "}
+            <strong>{t("itemsOpen")}:</strong> {openItems}
+          </div>
+        </div>
+
+        <div style={{ width: 320, maxWidth: "100%" }}>
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>{t("openVsDone")}</div>
+          <div style={{ width: "100%", height: 220 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Tooltip />
+                <Pie data={pieData} dataKey="value" nameKey="name" outerRadius={80} label>
+                <Cell fill="var(--open)" />
+                <Cell fill="var(--done)" />
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      <hr className="divider" />
+
+      <section>
+        <h3 style={{ marginTop: 0 }}>{t("members")}</h3>
+
+        <ul style={{ paddingLeft: 20, marginTop: 8 }}>
+          {safeList.members.map((member) => (
             <li
               key={member.id}
               style={{
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
-                marginBottom: 4,
+                gap: 10,
+                marginBottom: 6
               }}
             >
               <span>
                 {member.name}
-                {member.id === shoppingList.ownerId && (
-                  <span style={{ color: "#888" }}> (vlastník)</span>
-                )}
-                {member.id === currentUserId && (
-                  <span style={{ color: "#0070f3" }}> (ty)</span>
-                )}
+                {member.id === safeList.ownerId ? ` (${t("owner")})` : ""}
+                {member.id === currentUserId ? ` (${t("you")})` : ""}
               </span>
 
-              {isOwner && member.id !== shoppingList.ownerId && (
-                <button onClick={() => handleRemoveMember(member.id)}>
-                  Odebrat
+              {isOwner && member.id !== safeList.ownerId && (
+                <button className="btn" onClick={() => handleRemoveMember(member.id)}>
+                  {t("remove")}
                 </button>
               )}
             </li>
@@ -351,45 +372,55 @@ function ShoppingListDetailRoute() {
         </ul>
 
         {isOwner && (
-          <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
+          <div className="row" style={{ marginTop: 10 }}>
             <input
+              className="input"
+              style={{ flex: 1 }}
               type="text"
               value={newMemberName}
               onChange={(e) => setNewMemberName(e.target.value)}
-              placeholder="Jméno nového člena"
-              style={{ flex: 1, padding: "6px 8px" }}
+              placeholder={t("addMemberPlaceholder")}
             />
-            <button onClick={handleAddMember}>Přidat člena</button>
+            <button className="btn btn--primary" onClick={handleAddMember}>
+              {t("addMember")}
+            </button>
           </div>
         )}
 
         {currentUser && !isOwner && (
           <button
+            className="btn btn--danger"
             onClick={handleLeaveList}
-            style={{ marginTop: 12, background: "#ffe0e0" }}
+            style={{ marginTop: 10 }}
           >
-            Odejít z nákupního seznamu
+            {t("leaveList")}
           </button>
         )}
       </section>
 
-      <section style={sectionStyle}>
-        <h3>Položky nákupního seznamu</h3>
+      <hr className="divider" />
 
-        <div style={{ marginBottom: 12 }}>
-          <label>
-            Zobrazit:{" "}
-            <select value={itemFilter} onChange={handleChangeFilter}>
-              <option value="open">jen nevyřešené</option>
-              <option value="all">všechny (včetně vyřešených)</option>
+      <section>
+        <h3 style={{ marginTop: 0 }}>{t("items")}</h3>
+
+        <div className="row" style={{ marginBottom: 10 }}>
+          <label className="field">
+            <span className="field__label">{t("show")}</span>
+            <select
+              className="input"
+              value={itemFilter}
+              onChange={(e) => setItemFilter(e.target.value)}
+            >
+              <option value="open">{t("showOpenOnly")}</option>
+              <option value="all">{t("showAll")}</option>
             </select>
           </label>
         </div>
 
         {filteredItems.length === 0 ? (
-          <p>Žádné položky k zobrazení.</p>
+          <p>{t("noItems")}</p>
         ) : (
-          <ul style={{ listStyle: "none", paddingLeft: 0 }}>
+          <ul style={{ listStyle: "none", paddingLeft: 0, margin: 0 }}>
             {filteredItems.map((item) => (
               <li
                 key={item.id}
@@ -397,75 +428,62 @@ function ShoppingListDetailRoute() {
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "space-between",
-                  padding: "4px 0",
-                  borderBottom: "1px solid #eee",
+                  gap: 10,
+                  padding: "8px 0",
+                  borderBottom: "1px solid var(--border)"
                 }}
               >
-                <div>
-                  <label style={{ cursor: isVisitor ? "default" : "pointer" }}>
-                    <input
-                      type="checkbox"
-                      checked={item.done}
-                      disabled={isVisitor}
-                      onChange={() => handleToggleItemDone(item.id)}
-                      style={{ marginRight: 8 }}
-                    />
-                    <span
-                      style={{
-                        textDecoration: item.done ? "line-through" : "none",
-                        color: item.done ? "#888" : "inherit",
-                      }}
-                    >
-                      {item.name}
-                    </span>
-                  </label>
-                </div>
+                <label style={{ cursor: isVisitor ? "default" : "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={item.done}
+                    disabled={isVisitor}
+                    onChange={() => handleToggleItemDone(item.id)}
+                    style={{ marginRight: 8 }}
+                  />
+                  <span
+                    style={{
+                      textDecoration: item.done ? "line-through" : "none",
+                      color: item.done ? "var(--muted)" : "inherit"
+                    }}
+                  >
+                    {item.name}
+                  </span>
+                </label>
+
                 <button
+                  className="btn btn--danger"
                   onClick={() => handleRemoveItem(item.id)}
                   disabled={isVisitor}
                 >
-                  Smazat
+                  {t("delete")}
                 </button>
               </li>
             ))}
           </ul>
         )}
 
-        <div style={{ marginTop: 16, display: "flex", gap: 8 }}>
+        <div className="row" style={{ marginTop: 12 }}>
           <input
+            className="input"
+            style={{ flex: 1 }}
             type="text"
             value={newItemName}
             onChange={(e) => setNewItemName(e.target.value)}
-            placeholder={
-              isVisitor
-                ? "Návštěvník nemůže přidávat položky"
-                : "Název nové položky"
-            }
-            style={{ flex: 1, padding: "6px 8px" }}
+            placeholder={isVisitor ? t("addItemDisabledPlaceholder") : t("addItemPlaceholder")}
             disabled={isVisitor}
           />
-          <button onClick={handleAddItem} disabled={isVisitor}>
-            Přidat položku
+          <button
+            className="btn btn--primary"
+            onClick={handleAddItem}
+            disabled={isVisitor}
+          >
+            {t("addItem")}
           </button>
         </div>
       </section>
     </div>
   );
 }
-
-const cardStyle = {
-  maxWidth: 800,
-  margin: "0 auto",
-  background: "#fff",
-  padding: 24,
-  borderRadius: 8,
-  boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
-};
-
-const sectionStyle = {
-  marginBottom: 24,
-  paddingTop: 12,
-  borderTop: "1px solid #eee",
-};
 
 export default ShoppingListDetailRoute;

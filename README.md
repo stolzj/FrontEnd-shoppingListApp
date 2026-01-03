@@ -4,7 +4,7 @@
 `npm install`
 
 # Spuštění s mock backendem
-Projekt je ve výchozím stavu nastaven tak, že `npm start` spustí aplikaci s mockovanými server calls.
+Projekt je ve výchozím stavu nastaven tak, že `npm start` spustí aplikaci s mockovanými server calls pomocí knihovny MSW.
 
 # Spuštění bez mocků
 `npm run start:nomock`
